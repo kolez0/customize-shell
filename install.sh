@@ -15,6 +15,14 @@ JOURNAL_DIR=
 JOURNAL_COUNT=0
 CONFIG_STARTED=0
 
+if [ -d "$HOME/.local/bin" ]; then
+  case ":${PATH:-}:" in
+    *":$HOME/.local/bin:"*) ;;
+    *) PATH="$HOME/.local/bin${PATH:+:$PATH}" ;;
+  esac
+  export PATH
+fi
+
 say() { printf '%s\n' "customize-zsh: $*"; }
 fail() { printf '%s\n' "customize-zsh: ошибка: $*" >&2; exit 1; }
 has() { command -v "$1" >/dev/null 2>&1; }
