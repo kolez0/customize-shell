@@ -1,0 +1,91 @@
+add_newline = false
+command_timeout = 1000
+right_format = "$status$cmd_duration"
+format = """
+$directory$fill$git_branch$git_status$kubernetes
+$os$username$hostname$character
+"""
+
+[fill]
+symbol = " "
+style = "fg:bright-black"
+
+[directory]
+format = "[$path]($style)[$read_only]($read_only_style) "
+style = "white"
+home_symbol = "~"
+truncation_length = 2
+truncation_symbol = "…/"
+truncate_to_repo = false
+read_only = " 󰌾"
+
+[git_branch]
+format = "[$symbol$branch]($style) "
+symbol = " "
+style = "white"
+truncation_length = 32
+
+[git_status]
+format = "([$all_status$ahead_behind]($style) )"
+style = "yellow"
+conflicted = "✖${count} "
+ahead = "⇡${count}"
+behind = "⇣${count}"
+diverged = "⇕⇡${ahead_count}⇣${behind_count}"
+untracked = "?${count} "
+stashed = "${count} "
+modified = "!${count} "
+staged = "+${count} "
+renamed = "»${count} "
+deleted = "✘${count} "
+
+[kubernetes]
+disabled = false
+format = "[$symbol$context(::$namespace)]($style) "
+symbol = "☸ "
+style = "bright-black"
+detect_files = ["kustomization.yaml", "Chart.yaml"]
+detect_folders = ["k8s", "kubernetes"]
+contexts = [
+  { context_pattern = "(?:.*[-_.])?(?:prod|production)(?:[-_.].*)?", style = "yellow" },
+]
+
+[os]
+disabled = false
+format = "[$symbol]($style) "
+style = "bright-black"
+
+[os.symbols]
+Macos = ""
+Debian = ""
+Ubuntu = ""
+Fedora = ""
+Arch = ""
+
+[username]
+format = "[$user]($style)"
+show_always = false
+style_user = "bright-black"
+style_root = "bright-black"
+
+[hostname]
+format = "[@$hostname]($style) "
+ssh_only = true
+trim_at = "."
+style = "bright-black"
+
+[character]
+success_symbol = "[\\$](bold cyan) "
+error_symbol = "[\\$](bold red) "
+vimcmd_symbol = "[\\$](bold cyan) "
+
+[status]
+disabled = false
+format = "[ошибка $status]($style) "
+style = "red"
+
+[cmd_duration]
+min_time = 2000
+show_milliseconds = false
+format = "[$duration]($style) "
+style = "bright-black"
