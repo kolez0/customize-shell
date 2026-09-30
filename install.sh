@@ -183,6 +183,7 @@ install_dependencies() {
 }
 
 install_antidote() {
+  [ ! -L "$ANTIDOTE_DIR" ] || fail "каталог $ANTIDOTE_DIR является симлинком; он не изменён."
   if [ -e "$ANTIDOTE_DIR" ]; then
     if ! git -C "$ANTIDOTE_DIR" remote get-url origin 2>/dev/null | grep -Eq '^https://github\.com/mattmc3/antidote(\.git)?$'; then
       fail "каталог $ANTIDOTE_DIR уже существует и не является подтверждённой установкой Antidote; он не изменён."
@@ -210,9 +211,12 @@ atomic_file() {
   target_dir=${target_path%/*}
   mkdir -p "$target_dir"
   [ ! -L "$target_path" ] || fail "целевой файл $target_path является симлинком; он не изменён."
+  temp_path=$(mktemp "$target_path.tmp.XXXXXX") || fail "не удалось создать временный файл рядом с $target_path."
   record_change "$target_path"
-  temp_path="$target_path.tmp.$$"
-  cp -p "$source_path" "$temp_path"
+  if ! cp -p "$source_path" "$temp_path"; then
+    rm -f "$temp_path"
+    fail "не удалось подготовить временную копию для $target_path."
+  fi
   mv -f "$temp_path" "$target_path"
 }
 
@@ -246,6 +250,7 @@ copy_managed() {
   [ ! -L "$OWNERSHIP_DIR" ] || fail "каталог записей владения $OWNERSHIP_DIR является симлинком; он не изменён."
   case "$state_name" in
     zsh/*)
+      [ ! -L "$ZSH_CONFIG_DIR" ] || fail 'каталог конфигурации zsh является симлинком; он не изменён.'
       [ ! -L "$BACKUP_DIR/zsh" ] || fail 'вложенный каталог резервных копий является симлинком; он не изменён.'
       [ ! -L "$OWNERSHIP_DIR/zsh" ] || fail 'вложенный каталог записей владения является симлинком; он не изменён.'
       ;;
@@ -255,7 +260,28 @@ copy_managed() {
 
   previous_state=
   backup_path=
-  [ ! -f "$OWNERSHIP_DIR/$state_name" ] || previous_state=$(cat "$OWNERSHIP_DIR/$state_name")
+  state_file=$OWNERSHIP_DIR/$state_name
+  [ ! -L "$state_file" ] || fail "запись владения для $state_name является симлинком; файл не изменён."
+  if [ -e "$state_file" ]; then
+    [ -f "$state_file" ] || fail "запись владения для $state_name не является обычным файлом; файл не изменён."
+    previous_state=$(cat "$state_file")
+  fi
+  case "$previous_state" in
+    ''|created|preexisting|backup:*) ;;
+    *) fail "неизвестное состояние владения для $state_name; файл не изменён." ;;
+  esac
+  case "$previous_state" in
+    backup:*)
+      previous_backup=${previous_state#backup:}
+      previous_prefix=$BACKUP_DIR/$state_name.
+      case "$previous_backup" in
+        "$previous_prefix"*) previous_suffix=${previous_backup#"$previous_prefix"} ;;
+        *) fail "путь резервной копии для $state_name недопустим; файл не изменён." ;;
+      esac
+      case "$previous_suffix" in ''|*/*) fail "путь резервной копии для $state_name содержит недопустимые компоненты." ;; esac
+      [ ! -L "$previous_backup" ] && [ -f "$previous_backup" ] || fail "резервная копия для $state_name отсутствует или является симлинком; файл не изменён."
+      ;;
+  esac
   if [ -f "$target_file" ] && cmp -s "$source_file" "$target_file"; then
     [ -n "$previous_state" ] || write_state "$state_name" preexisting
     add_manifest_target "$state_name"
@@ -263,12 +289,23 @@ copy_managed() {
   fi
 
   if [ -e "$target_file" ]; then
-    backup_path="$BACKUP_DIR/$state_name.$TIMESTAMP.$$"
+    backup_base="$BACKUP_DIR/$state_name.$TIMESTAMP.$$"
+    backup_path=$backup_base
+    backup_sequence=1
+    while [ -e "$backup_path" ] || [ -L "$backup_path" ]; do
+      backup_path="$backup_base.$backup_sequence"
+      backup_sequence=$((backup_sequence + 1))
+    done
     mkdir -p "${backup_path%/*}"
     cp -p "$target_file" "$backup_path"
-    write_state "$state_name" "backup:$backup_path"
+    case "$previous_state" in
+      backup:*|created) ;;
+      ''|preexisting) write_state "$state_name" "backup:$backup_path" ;;
+    esac
   else
-    [ -n "$previous_state" ] || write_state "$state_name" created
+    case "$previous_state" in
+      ''|preexisting) write_state "$state_name" created ;;
+    esac
   fi
 
   atomic_file "$target_file" "$source_file"
@@ -278,6 +315,7 @@ copy_managed() {
 }
 
 replace_zshrc_block() {
+  [ ! -L "$ZSHRC" ] || fail "$ZSHRC является симлинком; он не изменён."
   mkdir -p "${ZSHRC%/*}"
   block_tmp=$(mktemp "${TMPDIR:-/tmp}/customize-zsh-zshrc.XXXXXX") || fail 'не удалось создать временный файл для .zshrc.'
   block_body=$(mktemp "${TMPDIR:-/tmp}/customize-zsh-zshrc-body.XXXXXX") || fail 'не удалось создать временный файл блока .zshrc.'
@@ -315,19 +353,29 @@ rollback() {
   [ "$JOURNAL_COUNT" -gt 0 ] || return 0
   say 'ошибка во время копирования; восстанавливаю состояние до установки.' >&2
   rollback_index=$JOURNAL_COUNT
+  rollback_failed=0
   while [ "$rollback_index" -gt 0 ]; do
     record_name=$(printf '%08d' "$rollback_index")
     [ -f "$JOURNAL_DIR/$record_name.path" ] || { rollback_index=$((rollback_index - 1)); continue; }
     restore_path=$(cat "$JOURNAL_DIR/$record_name.path")
     if [ -f "$JOURNAL_DIR/$record_name.existed" ]; then
-      restore_tmp="$restore_path.rollback.$$"
-      cp -p "$JOURNAL_DIR/$record_name.data" "$restore_tmp" && mv -f "$restore_tmp" "$restore_path"
+      restore_tmp=$(mktemp "$restore_path.rollback.XXXXXX") || { rollback_failed=1; rollback_index=$((rollback_index - 1)); continue; }
+      if cp -p "$JOURNAL_DIR/$record_name.data" "$restore_tmp"; then
+        mv -f "$restore_tmp" "$restore_path" || rollback_failed=1
+      else
+        rm -f "$restore_tmp"
+        rollback_failed=1
+      fi
     else
-      rm -f "$restore_path"
+      rm -f "$restore_path" || rollback_failed=1
     fi
     rollback_index=$((rollback_index - 1))
   done
-  say 'откат завершён; резервные копии сохранены.' >&2
+  if [ "$rollback_failed" -eq 0 ]; then
+    say 'откат завершён; резервные копии сохранены.' >&2
+  else
+    say 'откат выполнен не полностью; проверьте целевые файлы и журнал резервных копий.' >&2
+  fi
 }
 
 cleanup() {
@@ -344,6 +392,7 @@ trap 'exit 143' TERM
 
 detect_platform
 has zsh || fail 'zsh не установлен. Установите zsh вручную и повторите запуск; установщик zsh не устанавливает.'
+if [ -L "$ZSHRC" ]; then fail "$ZSHRC является симлинком; он не изменён."; fi
 install_dependencies
 install_antidote
 
@@ -353,10 +402,10 @@ trap cleanup 0
 CONFIG_STARTED=1
 
 bundle_tmp=$(mktemp "${TMPDIR:-/tmp}/customize-zsh-antidote.XXXXXX") || fail 'не удалось создать временный bundle плагинов.'
-if ! (
-  . "$ANTIDOTE_DIR/antidote.zsh"
-  antidote bundle < "$SCRIPT_DIR/config/zsh/.zsh_plugins.txt"
-) > "$bundle_tmp"; then
+if ! zsh -c '
+  source "$1/antidote.zsh" || exit 1
+  antidote bundle < "$2"
+' customize-zsh "$ANTIDOTE_DIR" "$SCRIPT_DIR/config/zsh/.zsh_plugins.txt" > "$bundle_tmp"; then
   rm -f "$bundle_tmp"
   fail 'не удалось собрать статический bundle Antidote.'
 fi

@@ -48,7 +48,7 @@ validate_state() {
   [ ! -L "$PROJECT_DIR/backups" ] || fail 'каталог резервных копий является симлинком; остановлено без изменений.'
   state_file=$OWNERSHIP_DIR/$entry
   [ ! -L "$state_file" ] || fail "запись владения для $entry является симлинком; остановлено без изменений."
-  [ -f "$state_file" ] || return 0
+  [ -f "$state_file" ] || fail "для записи манифеста $entry отсутствует состояние владения; остановлено без изменений."
   state=$(cat "$state_file")
   case "$state" in
     created|preexisting) ;;
@@ -58,6 +58,23 @@ validate_state() {
       ;;
     *) fail "неизвестное состояние владения для $entry; остановлено без изменений." ;;
   esac
+}
+
+validate_ownership_index() {
+  [ ! -L "$OWNERSHIP_DIR" ] || fail 'каталог записей владения является симлинком; остановлено без изменений.'
+  [ ! -L "$OWNERSHIP_DIR/zsh" ] || fail 'вложенный каталог записей владения является симлинком; остановлено без изменений.'
+  for state_path in "$OWNERSHIP_DIR"/* "$OWNERSHIP_DIR"/.[!.]* "$OWNERSHIP_DIR"/..?* \
+    "$OWNERSHIP_DIR/zsh"/* "$OWNERSHIP_DIR/zsh"/.[!.]* "$OWNERSHIP_DIR/zsh"/..?*; do
+    [ -e "$state_path" ] || [ -L "$state_path" ] || continue
+    if [ -d "$state_path" ]; then
+      [ "$state_path" = "$OWNERSHIP_DIR/zsh" ] || fail "неожиданный каталог в журнале владения: $state_path"
+      continue
+    fi
+    [ ! -L "$state_path" ] && [ -f "$state_path" ] || fail "неожиданный объект в журнале владения: $state_path"
+    relative_state=${state_path#"$OWNERSHIP_DIR"/}
+    target_for "$relative_state"
+    grep -F -x -q "$relative_state" "$MANIFEST" || fail "запись владения $relative_state отсутствует в манифесте; остановлено без изменений."
+  done
 }
 
 remove_zshrc_block() {
@@ -94,8 +111,11 @@ restore_target() {
       backup=${state#backup:}
       validate_backup_path "$1" "$backup"
       mkdir -p "${TARGET%/*}"
-      temp_target="$TARGET.restore.$$"
-      cp -p "$backup" "$temp_target"
+      temp_target=$(mktemp "$TARGET.restore.XXXXXX") || fail "не удалось создать временный файл рядом с $TARGET."
+      if ! cp -p "$backup" "$temp_target"; then
+        rm -f "$temp_target"
+        fail "не удалось подготовить восстановление $TARGET."
+      fi
       mv -f "$temp_target" "$TARGET"
       say "восстановлен $TARGET из $backup"
       ;;
@@ -111,29 +131,33 @@ restore_target() {
   rm -f "$state_file"
 }
 
-# Проверить весь манифест и типы целей до первого изменения файлов.
-if [ -f "$MANIFEST" ]; then
-  [ ! -L "$MANIFEST" ] || fail 'манифест является симлинком; остановлено без изменений.'
-  while IFS= read -r entry || [ -n "$entry" ]; do
-    [ -n "$entry" ] || continue
-    validate_state "$entry"
-    [ ! -L "$TARGET" ] || fail "цель $TARGET является симлинком; остановлено без изменений."
-  done < "$MANIFEST"
-fi
+# Проверить наличие манифеста и все записи до первого изменения файлов.
+[ ! -L "$MANIFEST" ] || fail 'манифест является симлинком; остановлено без изменений.'
+[ ! -L "$PROJECT_DIR" ] || fail 'каталог проекта является симлинком; остановлено без изменений.'
 [ ! -L "$OWNERSHIP_DIR" ] || fail 'каталог записей владения является симлинком; остановлено без изменений.'
+[ -f "$MANIFEST" ] || fail 'манифест установки не найден; конфигурация и журнал владения не изменены.'
+if ! awk 'NF { if (seen[$0]++) invalid = 1; count++ } END { if (invalid || count == 0) exit 1 }' "$MANIFEST"; then
+  fail 'манифест пуст или содержит повторные записи; конфигурация и журнал владения не изменены.'
+fi
+while IFS= read -r entry || [ -n "$entry" ]; do
+  [ -n "$entry" ] || continue
+  validate_state "$entry"
+  case "$entry" in
+    zsh/*) [ ! -L "$ZSH_CONFIG_DIR" ] || fail 'каталог конфигурации zsh является симлинком; остановлено без изменений.' ;;
+  esac
+  [ ! -L "$TARGET" ] || fail "цель $TARGET является симлинком; остановлено без изменений."
+done < "$MANIFEST"
+validate_ownership_index
 
 remove_zshrc_block
-if [ -f "$MANIFEST" ]; then
-  while IFS= read -r entry || [ -n "$entry" ]; do
-    [ -n "$entry" ] || continue
-    restore_target "$entry"
-  done < "$MANIFEST"
-  rm -f "$MANIFEST"
-else
-  say 'манифест не найден; управляемые файлы не менялись.'
-fi
+while IFS= read -r entry || [ -n "$entry" ]; do
+  [ -n "$entry" ] || continue
+  restore_target "$entry"
+done < "$MANIFEST"
+rm -f "$MANIFEST"
 
-if [ -d "$OWNERSHIP_DIR" ]; then rm -rf "$OWNERSHIP_DIR"; fi
+rmdir "$OWNERSHIP_DIR/zsh" 2>/dev/null || :
+rmdir "$OWNERSHIP_DIR" 2>/dev/null || :
 rmdir "$ZSH_CONFIG_DIR" 2>/dev/null || :
 say "резервные копии сохранены в $PROJECT_DIR/backups"
 say 'Antidote и установленные системные утилиты оставлены без изменений.'
