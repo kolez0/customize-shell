@@ -13,7 +13,13 @@ if (( $+commands[fzf] )); then
     function customize-zsh-fzf-files() {
       local selected
       local -a preview_args
-      (( $+commands[bat] || $+commands[batcat] )) && preview_args=(--preview 'bat --color=always --style=numbers --line-range=:500 -- {}')
+      local preview_command
+      if (( $+commands[bat] )); then
+        preview_command=bat
+      elif (( $+commands[batcat] )); then
+        preview_command=batcat
+      fi
+      [[ -z "$preview_command" ]] || preview_args=(--preview "$preview_command --color=always --style=numbers --line-range=:500 -- {}")
       selected="$(fd --type f 2>/dev/null | fzf "${preview_args[@]}")" || return
       [[ -n "$selected" ]] && LBUFFER+="${(q)selected}"
     }
