@@ -11,9 +11,8 @@ symbol = " "
 style = "fg:bright-black"
 
 [directory]
-format = "[$symbol$path]($style)[$read_only]($read_only_style) "
+format = "[󰉋 $path]($style)[$read_only]($read_only_style) "
 style = "white"
-symbol = "󰉋 "
 home_symbol = "~"
 truncation_length = 2
 truncation_symbol = "…/"

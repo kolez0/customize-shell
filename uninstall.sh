@@ -96,7 +96,11 @@ remove_zshrc_block() {
     rm -f "$temp_file"
     return 0
   fi
-  chmod "$(stat -f '%Lp' "$ZSHRC" 2>/dev/null || stat -c '%a' "$ZSHRC")" "$temp_file"
+  case "$(uname -s)" in
+    Darwin) zshrc_mode=$(stat -f '%Lp' "$ZSHRC") ;;
+    *) zshrc_mode=$(stat -c '%a' "$ZSHRC") ;;
+  esac
+  chmod "$zshrc_mode" "$temp_file"
   mv -f "$temp_file" "$ZSHRC"
   say 'удалён помеченный блок из .zshrc.'
 }
