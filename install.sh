@@ -149,18 +149,49 @@ install_eza_debian() {
   as_root apt-get install -y eza
 }
 
+package_is_installed() {
+  case "$PLATFORM" in
+    macos) brew list --formula --versions "$1" >/dev/null 2>&1 ;;
+    debian|ubuntu) [ "$(dpkg-query -W -f='${Status}' "$1" 2>/dev/null)" = 'install ok installed' ] ;;
+    fedora) rpm -q -- "$1" >/dev/null 2>&1 ;;
+    arch) pacman -Q -- "$1" >/dev/null 2>&1 ;;
+  esac
+}
+
+install_missing_packages() {
+  missing_packages=
+  for package do
+    if ! package_is_installed "$package"; then
+      missing_packages="${missing_packages:+$missing_packages }$package"
+    fi
+  done
+  [ -n "$missing_packages" ] || return 0
+
+  # Package names below are fixed literals without whitespace.
+  # shellcheck disable=SC2086
+  set -- $missing_packages
+  case "$PLATFORM" in
+    macos) brew install "$@" ;;
+    debian|ubuntu)
+      as_root apt-get update
+      as_root apt-get install -y "$@"
+      ;;
+    fedora) as_root dnf install -y "$@" ;;
+    arch) as_root pacman -S --needed --noconfirm "$@" ;;
+  esac
+}
+
 install_dependencies() {
   case "$PLATFORM" in
     macos)
-      brew install git starship fzf fd bat eza ripgrep zoxide
+      install_missing_packages git starship fzf fd bat eza ripgrep zoxide
       if ! starship_is_suitable; then
         brew upgrade starship || :
         starship_is_suitable || install_starship_upstream
       fi
       ;;
     debian|ubuntu)
-      as_root apt-get update
-      as_root apt-get install -y git curl ca-certificates tar gzip gpg fzf fd-find bat ripgrep
+      install_missing_packages git curl ca-certificates tar gzip gpg fzf fd-find bat ripgrep
       if ! has eza; then install_eza_debian; fi
       if ! has zoxide; then install_zoxide_upstream; fi
       if ! starship_is_suitable; then
@@ -174,11 +205,11 @@ install_dependencies() {
       fi
       ;;
     fedora)
-      as_root dnf install -y git curl ca-certificates tar gzip fzf fd-find bat eza ripgrep zoxide
+      install_missing_packages git curl ca-certificates tar gzip fzf fd-find bat eza ripgrep zoxide
       if ! starship_is_suitable; then install_starship_upstream; fi
       ;;
     arch)
-      as_root pacman -S --needed --noconfirm git starship fzf fd bat eza ripgrep zoxide curl ca-certificates tar gzip gnupg
+      install_missing_packages git starship fzf fd bat eza ripgrep zoxide curl ca-certificates tar gzip gnupg
       if ! starship_is_suitable; then install_starship_upstream; fi
       ;;
   esac

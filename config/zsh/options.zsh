@@ -2,6 +2,7 @@
 setopt AUTO_CD
 setopt INTERACTIVE_COMMENTS
 setopt EXTENDED_GLOB
+setopt NUMERIC_GLOB_SORT
 setopt NO_BEEP
 
 typeset -U path PATH
