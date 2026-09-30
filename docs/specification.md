@@ -16,7 +16,7 @@
 
 ## Целевые платформы
 
-- macOS с установленным Homebrew.
+- macOS 15 и новее на компьютерах с Apple Silicon, с установленным Homebrew.
 - Debian и Ubuntu с `apt`.
 - Fedora с `dnf`.
 - Arch Linux с `pacman`.

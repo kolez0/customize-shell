@@ -42,13 +42,16 @@ detect_platform() {
   case "$OS_NAME" in
     Darwin)
       PLATFORM=macos
-      has brew || fail 'не найден Homebrew; установите его и повторите запуск.'
+      if [ "$(sysctl -n hw.optional.arm64 2>/dev/null || :)" != 1 ]; then
+        fail 'поддерживаются только компьютеры Mac с Apple Silicon; Intel Mac не входит в матрицу поддержки.'
+      fi
       MACOS_VERSION=$(sw_vers -productVersion)
       MACOS_MAJOR=${MACOS_VERSION%%.*}
       case "$MACOS_MAJOR" in
-        14|15|26) ;;
-        *) fail "macOS $MACOS_VERSION отсутствует в матрице поддержки (14, 15, 26)." ;;
+        ''|*[!0-9]*) fail "не удалось определить версию macOS '$MACOS_VERSION'." ;;
       esac
+      [ "$MACOS_MAJOR" -ge 15 ] || fail "macOS $MACOS_VERSION не поддерживается; требуется macOS 15 или новее."
+      has brew || fail 'не найден Homebrew; установите его и повторите запуск.'
       ;;
     Linux)
       [ -r /etc/os-release ] || fail 'не найден /etc/os-release; определить дистрибутив Linux невозможно.'
