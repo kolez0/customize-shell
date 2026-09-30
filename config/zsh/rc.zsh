@@ -13,6 +13,8 @@ done
 
 export STARSHIP_CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/starship.toml"
 if (( $+commands[starship] )); then
+  # promptinit themes keep a precmd hook that can replace Starship's PROMPT.
+  (( $+functions[prompt] )) && prompt off
   function _customize_zsh_select_starship_config() {
     if (( COLUMNS < 120 )); then
       export STARSHIP_CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/customize-zsh/starship-compact.toml"
